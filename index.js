@@ -75,6 +75,15 @@ function saveGreetings(greetings) {
 }
 
 // Routes
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'Floppy Disk Portfolio Greetings API',
+    message: 'Backend is running. Use /api/health for detailed health check.',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
