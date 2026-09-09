@@ -12,3 +12,4 @@ greetings.json
 
 # Logs
 *.log
+.vercel

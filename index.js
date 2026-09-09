@@ -1,26 +1,16 @@
 import express from 'express';
 import cors from 'cors';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DATA_FILE = path.join(__dirname, 'greetings.json');
 
 const app = express();
-const PORT = process.env.PORT || 5001;
 
-// CORS - UPDATE THE ORIGINS BELOW WITH YOUR ACTUAL VERCEL URL
+// CORS - origins allowed to call this API
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:5173',
-  // >>> REPLACE THIS WITH YOUR ACTUAL VERCEL URL <<<
+  // >>> ADD ANY OTHER DEPLOYED FRONTEND URLS HERE <<<
   'https://personal-website-fatima-ali.vercel.app',
-  // Add custom domain later if needed:
-  // 'https://your-custom-domain.com'
 ];
 
 app.use(cors({
@@ -30,51 +20,87 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Helper: load greetings
-function loadGreetings() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) {
-      const initial = [
-        {
-          id: 'g-1',
-          name: 'Finn the Human',
-          email: 'finn@treefort.local',
-          message: 'Mathematical! Love the floppy disk design, Fatima!',
-          stamp: '⭐',
-          timestamp: new Date().toISOString()
-        },
-        {
-          id: 'g-2',
-          name: 'Marceline',
-          email: 'marcy@cave.net',
-          message: 'Pretty cool aesthetic. The ASCII portrait rocks.',
-          stamp: '🎸',
-          timestamp: new Date().toISOString()
-        }
-      ];
-      fs.writeFileSync(DATA_FILE, JSON.stringify(initial, null, 2), 'utf-8');
-      return initial;
-    }
-    const data = fs.readFileSync(DATA_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch (err) {
-    console.error('Error reading greetings data:', err);
-    return [];
+// ------------------------------------------------------------------
+// Persistence: Upstash KV (REST API) — durable across Vercel's
+// stateless serverless functions.
+//
+// Required env vars (set in Vercel project / .env for local dev):
+//   UPSTASH_REDIS_REST_URL   e.g. https://xxxx.upstash.io
+//   UPSTASH_REDIS_REST_TOKEN e.g. AYbXxxxx
+//
+// Fallback: if env vars are missing, we serve from an in-memory seed
+// (single deployment). Prefer Upstash so greetings persist.
+// ------------------------------------------------------------------
+const KV_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '';
+const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '';
+const KV_KEY = 'floppy_disk_greetings_v1';
+
+const SEED_GREETINGS = [
+  {
+    id: 'g-1',
+    name: 'Finn the Human',
+    email: 'finn@treefort.local',
+    message: 'Mathematical! Love the floppy disk design, Fatima!',
+    stamp: '⭐',
+    timestamp: new Date().toISOString()
+  },
+  {
+    id: 'g-2',
+    name: 'Marceline',
+    email: 'marcy@cave.net',
+    message: 'Pretty cool aesthetic. The ASCII portrait rocks.',
+    stamp: '🎸',
+    timestamp: new Date().toISOString()
   }
+];
+
+async function kvRequest(method, path = '', rawBody = null) {
+  const res = await fetch(`${KV_URL}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${KV_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    // Upstash REST expects the raw value as the request body (no extra JSON.stringify)
+    body: rawBody
+  });
+  if (!res.ok) {
+    throw new Error(`Upstash error ${res.status}: ${await res.text()}`);
+  }
+  return res.json();
 }
 
-// Helper: save greetings
-function saveGreetings(greetings) {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(greetings, null, 2), 'utf-8');
-    return true;
-  } catch (err) {
-    console.error('Error saving greetings data:', err);
-    return false;
+async function loadGreetings() {
+  if (!KV_URL || !KV_TOKEN) {
+    // No KV configured — serve seed data (non-persistent)
+    return SEED_GREETINGS;
   }
+  // Upstash REST: GET /get/<key> -> { result: "<json string>" | null }
+  const data = await kvRequest('GET', `/get/${KV_KEY}`);
+  let parsed = null;
+  try {
+    parsed = data.result ? JSON.parse(data.result) : null;
+  } catch (e) {
+    parsed = null;
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    // First run: seed the key via POST /set/<key> with body value
+    await kvRequest('POST', `/set/${KV_KEY}`, JSON.stringify(SEED_GREETINGS));
+    return SEED_GREETINGS;
+  }
+  return parsed;
 }
 
+async function saveGreetings(greetings) {
+  if (!KV_URL || !KV_TOKEN) return false;
+  // Upstash REST: POST /set/<key> with body value (returns { result: "OK" })
+  await kvRequest('POST', `/set/${KV_KEY}`, JSON.stringify(greetings));
+  return true;
+}
+
+// ------------------------------------------------------------------
 // Routes
+// ------------------------------------------------------------------
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
@@ -88,21 +114,23 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'Floppy Disk Portfolio Greetings API',
+    storage: (KV_URL && KV_TOKEN) ? 'upstash-kv' : 'in-memory (no Upstash env vars set)',
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
   });
 });
 
-app.get('/api/greetings', (req, res) => {
-  const greetings = loadGreetings();
-  res.json({
-    success: true,
-    count: greetings.length,
-    data: greetings
-  });
+app.get('/api/greetings', async (req, res) => {
+  try {
+    const greetings = await loadGreetings();
+    res.json({ success: true, count: greetings.length, data: greetings });
+  } catch (err) {
+    console.error('GET /api/greetings error:', err);
+    res.status(500).json({ success: false, error: 'Could not load greetings.' });
+  }
 });
 
-app.post('/api/greetings', (req, res) => {
+app.post('/api/greetings', async (req, res) => {
   const { name, email, message, stamp } = req.body;
 
   if (!name || !message) {
@@ -112,7 +140,6 @@ app.post('/api/greetings', (req, res) => {
     });
   }
 
-  const greetings = loadGreetings();
   const newGreeting = {
     id: 'g-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
     name: name.trim().slice(0, 80),
@@ -122,30 +149,42 @@ app.post('/api/greetings', (req, res) => {
     timestamp: new Date().toISOString()
   };
 
-  greetings.unshift(newGreeting);
-  saveGreetings(greetings);
+  try {
+    const greetings = await loadGreetings();
+    greetings.unshift(newGreeting);
+    await saveGreetings(greetings);
 
-  res.status(201).json({
-    success: true,
-    message: 'Greeting received and saved to floppy disk sector!',
-    data: newGreeting
-  });
-});
-
-app.delete('/api/greetings/:id', (req, res) => {
-  const { id } = req.params;
-  let greetings = loadGreetings();
-  const initialLength = greetings.length;
-  greetings = greetings.filter(g => g.id !== id);
-
-  if (greetings.length === initialLength) {
-    return res.status(404).json({ success: false, error: 'Greeting not found.' });
+    res.status(201).json({
+      success: true,
+      message: 'Greeting received and saved to floppy disk sector!',
+      data: newGreeting
+    });
+  } catch (err) {
+    console.error('POST /api/greetings error:', err);
+    res.status(500).json({ success: false, error: 'Could not save greeting.' });
   }
-
-  saveGreetings(greetings);
-  res.json({ success: true, message: 'Greeting removed successfully.' });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Floppy Disk Backend] Server listening on http://localhost:${PORT}`);
+app.delete('/api/greetings/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const greetings = await loadGreetings();
+    const initialLength = greetings.length;
+    const filtered = greetings.filter(g => g.id !== id);
+
+    if (filtered.length === initialLength) {
+      return res.status(404).json({ success: false, error: 'Greeting not found.' });
+    }
+
+    await saveGreetings(filtered);
+    res.json({ success: true, message: 'Greeting removed successfully.' });
+  } catch (err) {
+    console.error('DELETE /api/greetings/:id error:', err);
+    res.status(500).json({ success: false, error: 'Could not delete greeting.' });
+  }
 });
+
+// ------------------------------------------------------------------
+// Vercel serverless export (no app.listen — Vercel invokes the handler)
+// ------------------------------------------------------------------
+export default app;
