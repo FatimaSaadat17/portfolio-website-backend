@@ -137,6 +137,6 @@ app.delete('/api/greetings/:id', (req, res) => {
   res.json({ success: true, message: 'Greeting removed successfully.' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Floppy Disk Backend] Server listening on http://localhost:${PORT}`);
 });
