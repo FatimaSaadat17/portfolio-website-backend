@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Data
+greetings.json
+
+# Environment
+.env
+
+# OS
+.DS_Store
+
+# Logs
+*.log
