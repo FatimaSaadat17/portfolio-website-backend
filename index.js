@@ -185,32 +185,14 @@ app.delete('/api/greetings/:id', async (req, res) => {
 });
 
 // ------------------------------------------------------------------
-// Music Taste Analyzer — AI backend route (Vercel serverless)
+// Music Taste Analyzer — Multi-tier AI Engine (Vercel Serverless)
 // ------------------------------------------------------------------
-// This route calls the Hermes Agent Docker container's OpenAI-compatible
-// API server (http://localhost:8642/v1/chat/completions) with a curated
-// prompt that turns 5 songs into a personality type + traits + summary.
-//
-// Where does the request point? Injected from env at request time:
-//   MUSIC_ANALYZER_API_URL      OpenAI-compatible API server base (optional)
-//   MUSIC_ANALYZER_API_KEY      bearer key for that server (optional)
-// If unset locally, we default to the local Docker container
-// (http://localhost:8642) using the API_SERVER_KEY from the host .env
-// (visible to the local server, NOT to Vercel).
-//
-// On Vercel, the container does not run — set these two env vars in the
-// Vercel project to wherever your Hermes Docker container's API server is
-// reachable (e.g. a tunnel URL), or the route returns a clear offline
-// message. The frontend falls back gracefully either way.
+// Tier 1: Local / Tunnel Hermes Docker Agent (OpenAI-compatible)
+// Tier 2: Direct Google Gemini API (gemini-flash-lite-latest)
+// Tier 3: Built-in Sonic Personality Matrix (zero failure rate)
 // ------------------------------------------------------------------
-async function callMusicAnalyzerApi({ songs, name }) {
-  const apiBase = (process.env.MUSIC_ANALYZER_API_URL || 'http://localhost:8642').replace(/\/+$/, '');
-  // Local: reuse API_SERVER_KEY from host .env / Vercel env
-  const apiKey = process.env.MUSIC_ANALYZER_API_KEY
-    || process.env.API_SERVER_KEY
-    || '';
 
-  const systemPrompt = `You are the Music Taste Analyzer, a fun, personality-insight engine for a portfolio website.
+const SYSTEM_MUSIC_PROMPT = `You are the Music Taste Analyzer, a fun, personality-insight engine for a portfolio website.
 The user submits 5 of their favorite songs. Analyze the musical fingerprint (genre, mood, energy, lyrics themes, era, artist style) and return:
 1. personalityType: a creative Myers-Briggs-inspired label, e.g. "ENFP — The Sonic Dreamer"
 2. traits: an array of exactly 4 short, punchy personality trait labels (e.g. "Curious", "Nostalgic")
@@ -218,41 +200,135 @@ The user submits 5 of their favorite songs. Analyze the musical fingerprint (gen
 Always respond with VALID JSON ONLY, no markdown fences, no commentary, in this exact shape:
 {"personalityType":"...","traits":["...","...","...","..."],"summary":"..."}`;
 
-  const userPrompt = name && name.trim()
-    ? `Name: ${name.trim()}\nFavorite songs:\n${songs.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
-    : `Favorite songs:\n${songs.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+function buildMusicPrompt(songs, name) {
+  const list = songs.map((s, i) => `${i + 1}. ${s}`).join('\n');
+  return name && name.trim()
+    ? `Name: ${name.trim()}\nFavorite songs:\n${list}`
+    : `Favorite songs:\n${list}`;
+}
 
-  const res = await fetch(`${apiBase}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-    },
-    body: JSON.stringify({
-      model: 'hermes-agent',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      stream: false
-    })
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`AI backend responded ${res.status}: ${body.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content || '';
-  if (!content) throw new Error('AI backend returned an empty response.');
-
-  // Parse the JSON the model returns (strip any accidental fences)
+function parseModelJson(content) {
+  if (!content) throw new Error('Empty model response');
   const cleaned = content.replace(/```json|```/g, '').trim();
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('AI response was not valid JSON.');
+  if (start === -1 || end === -1) throw new Error('Response is not JSON');
   return JSON.parse(cleaned.slice(start, end + 1));
+}
+
+// Tier 1: OpenAI-compatible Hermes Agent API
+async function callHermesAgentApi({ songs, name }) {
+  const apiBase = (process.env.MUSIC_ANALYZER_API_URL || 'http://localhost:8642').replace(/\/+$/, '');
+  const apiKey = process.env.MUSIC_ANALYZER_API_KEY || process.env.API_SERVER_KEY || '';
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const res = await fetch(`${apiBase}/v1/chat/completions`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      },
+      body: JSON.stringify({
+        model: 'hermes-agent',
+        messages: [
+          { role: 'system', content: SYSTEM_MUSIC_PROMPT },
+          { role: 'user', content: buildMusicPrompt(songs, name) }
+        ],
+        stream: false
+      })
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) throw new Error(`Status ${res.status}`);
+    const data = await res.json();
+    return parseModelJson(data?.choices?.[0]?.message?.content);
+  } catch (e) {
+    clearTimeout(timeoutId);
+    throw e;
+  }
+}
+
+// Tier 2: Direct Google Gemini API (gemini-flash-lite-latest)
+async function callGeminiDirectApi({ songs, name }) {
+  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('No Google/Gemini API key configured');
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const promptText = `${SYSTEM_MUSIC_PROMPT}\n\n${buildMusicPrompt(songs, name)}`;
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: promptText }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      }
+    );
+    clearTimeout(timeoutId);
+    if (!res.ok) throw new Error(`Gemini status ${res.status}`);
+    const data = await res.json();
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return parseModelJson(rawText);
+  } catch (e) {
+    clearTimeout(timeoutId);
+    throw e;
+  }
+}
+
+// Tier 3: Built-in Sonic Personality Matrix (Deterministic Heuristic Engine)
+function generateHeuristicPersonality(songs, name) {
+  const archetypes = [
+    {
+      type: 'INFP — The Ethereal Dreamer',
+      traits: ['Introspective', 'Poetic', 'Atmospheric', 'Empathetic'],
+      summary: 'Your playlist drifts through nostalgic reverberations and poetic storytelling. You connect deeply with emotional subtleties and soundscapes that transport you to other worlds.'
+    },
+    {
+      type: 'ENFP — The Genre Voyager',
+      traits: ['Eclectic', 'Curious', 'High-Energy', 'Expressive'],
+      summary: 'You refuse to be pinned to a single sound. Your library is a treasure chest of unexpected crossovers, infectious rhythms, and boundary-pushing production.'
+    },
+    {
+      type: 'INTJ — The Sonic Architect',
+      traits: ['Analytical', 'Visionary', 'Layered', 'Methodical'],
+      summary: 'You are drawn to immaculate mixing, complex polyrhythms, and structural perfection. You appreciate music as an intricate puzzle of melody, texture, and technical mastery.'
+    },
+    {
+      type: 'INFJ — The Harmonic Mystic',
+      traits: ['Soulful', 'Vulnerable', 'Intuitive', 'Subtle'],
+      summary: 'For you, music is a spiritual language. You love songs that reveal new secrets with every listen and carry a genuine sense of purpose and wonder.'
+    },
+    {
+      type: 'ENTP — The Electric Maverick',
+      traits: ['Innovative', 'Daring', 'Playful', 'Futuristic'],
+      summary: 'Your tracks buzz with unpredictable beats and electric energy. You gravitate toward artists who take creative risks and bend conventional song structures.'
+    },
+    {
+      type: 'ISFP — The Melodic Purist',
+      traits: ['Authentic', 'Heartfelt', 'Grounded', 'Sensory'],
+      summary: 'You judge songs by raw emotional truth. Whether it is an acoustic chord or a booming synth, you value heartfelt expression above all else.'
+    }
+  ];
+
+  const seed = songs.join(' ').toLowerCase().split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const picked = archetypes[seed % archetypes.length];
+
+  const prefix = name ? `${name}'s track selections reflect` : 'Your track selections reflect';
+
+  return {
+    personalityType: picked.type,
+    traits: picked.traits,
+    summary: `${prefix} a refined acoustic palette. ${picked.summary}`
+  };
 }
 
 app.post('/api/music-analyze', async (req, res) => {
@@ -277,29 +353,58 @@ app.post('/api/music-analyze', async (req, res) => {
     });
   }
 
-  try {
-    const analysis = await callMusicAnalyzerApi({
-      songs: cleanedSongs,
-      name: typeof name === 'string' ? name.slice(0, 60) : ''
-    });
+  const cleanName = typeof name === 'string' ? name.slice(0, 60) : '';
 
-    res.json({
-      success: true,
-      data: {
-        songs: cleanedSongs,
-        personalityType: analysis.personalityType || 'The Unknown Groove',
-        traits: Array.isArray(analysis.traits) ? analysis.traits.slice(0, 4) : [],
-        summary: analysis.summary || 'Your music taste is uniquely yours — keep exploring!'
-      }
-    });
-  } catch (err) {
-    console.error('POST /api/music-analyze error:', err.message || err);
-    res.status(502).json({
-      success: false,
-      error: 'The music analysis engine is offline right now. Check back soon!',
-      detail: process.env.NODE_ENV === 'development' ? (err.message || String(err)) : undefined
-    });
+  // Attempt 1: Hermes Docker Agent API
+  try {
+    const analysis = await callHermesAgentApi({ songs: cleanedSongs, name: cleanName });
+    if (analysis?.personalityType) {
+      return res.json({
+        success: true,
+        source: 'hermes-agent',
+        data: {
+          songs: cleanedSongs,
+          personalityType: analysis.personalityType,
+          traits: Array.isArray(analysis.traits) ? analysis.traits.slice(0, 4) : [],
+          summary: analysis.summary || 'Your music taste is uniquely yours.'
+        }
+      });
+    }
+  } catch (err1) {
+    // Hermes agent offline / unreachable
   }
+
+  // Attempt 2: Direct Google Gemini API
+  try {
+    const analysis = await callGeminiDirectApi({ songs: cleanedSongs, name: cleanName });
+    if (analysis?.personalityType) {
+      return res.json({
+        success: true,
+        source: 'gemini-direct',
+        data: {
+          songs: cleanedSongs,
+          personalityType: analysis.personalityType,
+          traits: Array.isArray(analysis.traits) ? analysis.traits.slice(0, 4) : [],
+          summary: analysis.summary || 'Your music taste is uniquely yours.'
+        }
+      });
+    }
+  } catch (err2) {
+    // Direct Gemini key absent or call failed
+  }
+
+  // Attempt 3: Built-in Sonic Matrix (zero downtime guarantee)
+  const analysis = generateHeuristicPersonality(cleanedSongs, cleanName);
+  return res.json({
+    success: true,
+    source: 'sonic-matrix',
+    data: {
+      songs: cleanedSongs,
+      personalityType: analysis.personalityType,
+      traits: analysis.traits,
+      summary: analysis.summary
+    }
+  });
 });
 
 // ------------------------------------------------------------------
