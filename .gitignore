@@ -13,3 +13,4 @@ greetings.json
 # Logs
 *.log
 .vercel
+.env
