@@ -192,13 +192,14 @@ app.delete('/api/greetings/:id', async (req, res) => {
 // Tier 3: Built-in Sonic Personality Matrix (zero failure rate)
 // ------------------------------------------------------------------
 
-const SYSTEM_MUSIC_PROMPT = `You are the Music Taste Analyzer, a fun, personality-insight engine for a portfolio website.
-The user submits 5 of their favorite songs. Analyze the musical fingerprint (genre, mood, energy, lyrics themes, era, artist style) and return:
-1. personalityType: a creative Myers-Briggs-inspired label, e.g. "ENFP — The Sonic Dreamer"
-2. traits: an array of exactly 4 short, punchy personality trait labels (e.g. "Curious", "Nostalgic")
-3. summary: 2-3 sentences describing what their taste says about them, warm and encouraging.
-Always respond with VALID JSON ONLY, no markdown fences, no commentary, in this exact shape:
-{"personalityType":"...","traits":["...","...","...","..."],"summary":"..."}`;
+const SYSTEM_MUSIC_PROMPT = `You are the Music Taste Analyzer with a witty, playful, slightly roast-y yet lovable personality (like an observant best friend).
+Analyze the 5 submitted songs and return:
+1. personalityType: A funny, creative Myers-Briggs style archetype (e.g. "The Unrecovered Emo Elite", "The Performative Aux Dictator", "The 2AM Ceiling Stare Specialist", "The Sonic Overthinker")
+2. traits: exactly 4 punchy, humorous, and relatable personality traits (e.g. ["Side-swept bangs in spirit", "Weaponized nostalgia", "Main character energy", "Caffeine-fueled daydreamer"])
+3. percentages: an array of 3 to 4 vibe/personality metrics with percentage values totaling 100%. Give them cheeky, specific labels tailored to their exact tracks (e.g. "Performative Melodrama", "Main Character Energy", "Nostalgia Tax", "Aux Anxiety", "Eyeliner Smudge Factor", "A24 Sadness Lifestyle")
+4. summary: A 2-4 sentence witty roast/read of their music personality. Call them out directly with loving shade if they put emo tracks ("wow, you are so emo"), performative indie ("oh, you definitely love being performative on the aux"), shoegaze, pop bangers, rap, or classical.
+Always respond in VALID JSON ONLY with no markdown fences:
+{"personalityType":"...","traits":["...","...","...","..."],"percentages":[{"label":"...","value":45},{"label":"...","value":35},{"label":"...","value":20}],"summary":"..."}`;
 
 function buildMusicPrompt(songs, name) {
   const list = songs.map((s, i) => `${i + 1}. ${s}`).join('\n');
@@ -289,45 +290,66 @@ function generateHeuristicPersonality(songs, name) {
   const archetypes = [
     {
       type: 'INFP — The Ethereal Dreamer',
-      traits: ['Introspective', 'Poetic', 'Atmospheric', 'Empathetic'],
-      summary: 'Your playlist drifts through nostalgic reverberations and poetic storytelling. You connect deeply with emotional subtleties and soundscapes that transport you to other worlds.'
+      traits: ['Introspective', 'Poetic', 'Atmospheric', 'Overthinking'],
+      percentages: [
+        { label: 'Performative Melodrama', value: 45 },
+        { label: 'Main Character Energy', value: 35 },
+        { label: 'Nostalgia Factor', value: 20 }
+      ],
+      summary: 'Oh, wow, you definitely love staring out rain-streaked windows pretending you are the tragic protagonist in an indie movie. Your playlist is less about the music and more about auditioning for dramatic cinematic moments.'
     },
     {
-      type: 'ENFP — The Genre Voyager',
-      traits: ['Eclectic', 'Curious', 'High-Energy', 'Expressive'],
-      summary: 'You refuse to be pinned to a single sound. Your library is a treasure chest of unexpected crossovers, infectious rhythms, and boundary-pushing production.'
+      type: 'ENFP — The Performative Aux Dictator',
+      traits: ['Eclectic', 'Curious', 'High-Energy', 'Unfiltered'],
+      percentages: [
+        { label: 'Aux Hijacking Urge', value: 50 },
+        { label: 'Chaotic Genre Jumping', value: 30 },
+        { label: 'Dopamine Chasing', value: 20 }
+      ],
+      summary: 'You refuse to let anyone else touch the aux because you have convinced yourself only your curated vibe can save the room. We get it, you are eclectic—now please let a song play past the 90-second mark!'
     },
     {
-      type: 'INTJ — The Sonic Architect',
-      traits: ['Analytical', 'Visionary', 'Layered', 'Methodical'],
-      summary: 'You are drawn to immaculate mixing, complex polyrhythms, and structural perfection. You appreciate music as an intricate puzzle of melody, texture, and technical mastery.'
+      type: 'ISFP — The Unrecovered Emo Elite',
+      traits: ['Side-swept bangs at heart', 'Weaponized nostalgia', 'Vulnerable', 'Dramatic'],
+      percentages: [
+        { label: 'Eyeliner Smudge Factor', value: 45 },
+        { label: 'Undying 2006 Nostalgia', value: 35 },
+        { label: 'Emotional Release', value: 20 }
+      ],
+      summary: 'Wow, you are so deeply emo! You treat minor inconveniences like an acoustic breakdown and probably still believe marching band drums are a direct attack on your soul.'
     },
     {
-      type: 'INFJ — The Harmonic Mystic',
-      traits: ['Soulful', 'Vulnerable', 'Intuitive', 'Subtle'],
-      summary: 'For you, music is a spiritual language. You love songs that reveal new secrets with every listen and carry a genuine sense of purpose and wonder.'
+      type: 'INTJ — The Pretentious Sound Architect',
+      traits: ['Analytical', 'Visionary', 'Polyrhythm fan', 'Headphone snob'],
+      percentages: [
+        { label: 'Audio Snobbery', value: 40 },
+        { label: 'Over-analyzing Mixing', value: 35 },
+        { label: 'Earbud Disdain', value: 25 }
+      ],
+      summary: 'You do not just listen to music—you judge the panning, mixing, and frequency balance. You probably tell people they need lossless FLAC files to truly understand your aesthetic.'
     },
     {
-      type: 'ENTP — The Electric Maverick',
-      traits: ['Innovative', 'Daring', 'Playful', 'Futuristic'],
-      summary: 'Your tracks buzz with unpredictable beats and electric energy. You gravitate toward artists who take creative risks and bend conventional song structures.'
-    },
-    {
-      type: 'ISFP — The Melodic Purist',
-      traits: ['Authentic', 'Heartfelt', 'Grounded', 'Sensory'],
-      summary: 'You judge songs by raw emotional truth. Whether it is an acoustic chord or a booming synth, you value heartfelt expression above all else.'
+      type: 'INFJ — The 2AM Ceiling Stare Specialist',
+      traits: ['Soulful', 'A24 aesthetic', 'Quiet intensity', 'Deep thinker'],
+      percentages: [
+        { label: 'A24 Sadness Lifestyle', value: 50 },
+        { label: 'Late Night Overthinking', value: 30 },
+        { label: 'Secret Romantic', value: 20 }
+      ],
+      summary: 'Oh, so sadness is a full-time aesthetic now? Your music selections are so atmospheric and moody that your houseplants are probably asking for therapy.'
     }
   ];
 
   const seed = songs.join(' ').toLowerCase().split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
   const picked = archetypes[seed % archetypes.length];
 
-  const prefix = name ? `${name}'s track selections reflect` : 'Your track selections reflect';
+  const prefix = name ? `For ${name}: ` : '';
 
   return {
     personalityType: picked.type,
     traits: picked.traits,
-    summary: `${prefix} a refined acoustic palette. ${picked.summary}`
+    percentages: picked.percentages,
+    summary: `${prefix}${picked.summary}`
   };
 }
 
@@ -366,6 +388,7 @@ app.post('/api/music-analyze', async (req, res) => {
           songs: cleanedSongs,
           personalityType: analysis.personalityType,
           traits: Array.isArray(analysis.traits) ? analysis.traits.slice(0, 4) : [],
+          percentages: Array.isArray(analysis.percentages) ? analysis.percentages : [],
           summary: analysis.summary || 'Your music taste is uniquely yours.'
         }
       });
@@ -385,6 +408,7 @@ app.post('/api/music-analyze', async (req, res) => {
           songs: cleanedSongs,
           personalityType: analysis.personalityType,
           traits: Array.isArray(analysis.traits) ? analysis.traits.slice(0, 4) : [],
+          percentages: Array.isArray(analysis.percentages) ? analysis.percentages : [],
           summary: analysis.summary || 'Your music taste is uniquely yours.'
         }
       });
@@ -402,6 +426,7 @@ app.post('/api/music-analyze', async (req, res) => {
       songs: cleanedSongs,
       personalityType: analysis.personalityType,
       traits: analysis.traits,
+      percentages: analysis.percentages,
       summary: analysis.summary
     }
   });
