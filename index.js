@@ -192,13 +192,17 @@ app.delete('/api/greetings/:id', async (req, res) => {
 // Tier 3: Built-in Sonic Personality Matrix (zero failure rate)
 // ------------------------------------------------------------------
 
-const SYSTEM_MUSIC_PROMPT = `You are the Music Taste Analyzer with a witty, playful, slightly roast-y yet lovable personality (like an observant best friend).
-Analyze the 5 submitted songs and return:
-1. personalityType: A funny, creative Myers-Briggs style archetype (e.g. "The Unrecovered Emo Elite", "The Performative Aux Dictator", "The 2AM Ceiling Stare Specialist", "The Sonic Overthinker")
-2. traits: exactly 4 punchy, humorous, and relatable personality traits (e.g. ["Side-swept bangs in spirit", "Weaponized nostalgia", "Main character energy", "Caffeine-fueled daydreamer"])
-3. percentages: an array of 3 to 4 vibe/personality metrics with percentage values totaling 100%. Give them cheeky, specific labels tailored to their exact tracks (e.g. "Performative Melodrama", "Main Character Energy", "Nostalgia Tax", "Aux Anxiety", "Eyeliner Smudge Factor", "A24 Sadness Lifestyle")
-4. summary: A 2-4 sentence witty roast/read of their music personality. Call them out directly with loving shade if they put emo tracks ("wow, you are so emo"), performative indie ("oh, you definitely love being performative on the aux"), shoegaze, pop bangers, rap, or classical.
-Always respond in VALID JSON ONLY with no markdown fences:
+const SYSTEM_MUSIC_PROMPT = `You are the Music Taste Analyzer — a culturally hyper-literate, brutally perceptive, yet affectionate music critic and personality profiler with the sharp humor of an observant best friend.
+
+You analyze 5 favorite songs and decode the listener with razor-sharp cultural literacy (identifying micro-genres, aesthetic tropes, Tumblr/A24/TikTok eras, aux-cord habits, and psychological quirks).
+
+Output STRICT JSON with:
+1. "personalityType": A memorable, witty title (e.g., "The 2AM Ceiling Stare Specialist", "The Aux Cord Hostage Negotiator", "The 2006 Warped Tour Veteran", "The Pretentious Crate-Digger", "The Situationship Romantic").
+2. "traits": Exactly 4 punchy, specific traits with humor (e.g., ["Side-swept bangs in spirit", "Cries in Uber rides", "Romanticizes emotional unavailability", "Audio quality snob"]).
+3. "percentages": Array of 3 to 4 custom humorous metrics (label + integer value between 1-100, strictly totaling 100). Tailor the metrics specifically to their tracks (e.g., "Performative Sadness", "A24 Main Character Energy", "Aux Anxiety", "Eyeliner Smudge Factor", "Unchecked Nostalgia").
+4. "summary": 2-4 sentences of razor-sharp, affectionate roast + psychological reading. Directly call out their exact music habits ("oh, you definitely love being performative on the aux", "wow, you are so emo it hurts", "this playlist screams staring out of a rain-streaked window"). Name-drop or roast their specific artist choices.
+
+Respond with VALID JSON ONLY with no markdown fences, matching this structure:
 {"personalityType":"...","traits":["...","...","...","..."],"percentages":[{"label":"...","value":45},{"label":"...","value":35},{"label":"...","value":20}],"summary":"..."}`;
 
 function buildMusicPrompt(songs, name) {
@@ -289,17 +293,17 @@ async function callGeminiDirectApi({ songs, name }) {
 function generateHeuristicPersonality(songs, name) {
   const archetypes = [
     {
-      type: 'INFP — The Ethereal Dreamer',
-      traits: ['Introspective', 'Poetic', 'Atmospheric', 'Overthinking'],
+      type: 'The 2AM Ceiling Stare Specialist',
+      traits: ['Soulful', 'A24 aesthetic', 'Cries in Uber rides', 'Weaponized nostalgia'],
       percentages: [
-        { label: 'Performative Melodrama', value: 45 },
-        { label: 'Main Character Energy', value: 35 },
-        { label: 'Nostalgia Factor', value: 20 }
+        { label: 'A24 Sadness Lifestyle', value: 45 },
+        { label: 'Late Night Overthinking', value: 35 },
+        { label: 'Secret Romantic', value: 20 }
       ],
-      summary: 'Oh, wow, you definitely love staring out rain-streaked windows pretending you are the tragic protagonist in an indie movie. Your playlist is less about the music and more about auditioning for dramatic cinematic moments.'
+      summary: 'Oh, wow, you definitely love being performative on the aux! Your tracks are so atmospheric and melodramatic that you treat every minor life event like the emotional climax of an indie film.'
     },
     {
-      type: 'ENFP — The Performative Aux Dictator',
+      type: 'The Performative Aux Dictator',
       traits: ['Eclectic', 'Curious', 'High-Energy', 'Unfiltered'],
       percentages: [
         { label: 'Aux Hijacking Urge', value: 50 },
@@ -309,8 +313,8 @@ function generateHeuristicPersonality(songs, name) {
       summary: 'You refuse to let anyone else touch the aux because you have convinced yourself only your curated vibe can save the room. We get it, you are eclectic—now please let a song play past the 90-second mark!'
     },
     {
-      type: 'ISFP — The Unrecovered Emo Elite',
-      traits: ['Side-swept bangs at heart', 'Weaponized nostalgia', 'Vulnerable', 'Dramatic'],
+      type: 'The Unrecovered Emo Elite',
+      traits: ['Side-swept bangs in spirit', 'Weaponized nostalgia', 'Eyes-closed screaming in car', 'Dramatic'],
       percentages: [
         { label: 'Eyeliner Smudge Factor', value: 45 },
         { label: 'Undying 2006 Nostalgia', value: 35 },
@@ -319,7 +323,7 @@ function generateHeuristicPersonality(songs, name) {
       summary: 'Wow, you are so deeply emo! You treat minor inconveniences like an acoustic breakdown and probably still believe marching band drums are a direct attack on your soul.'
     },
     {
-      type: 'INTJ — The Pretentious Sound Architect',
+      type: 'The Pretentious Sound Architect',
       traits: ['Analytical', 'Visionary', 'Polyrhythm fan', 'Headphone snob'],
       percentages: [
         { label: 'Audio Snobbery', value: 40 },
@@ -329,14 +333,14 @@ function generateHeuristicPersonality(songs, name) {
       summary: 'You do not just listen to music—you judge the panning, mixing, and frequency balance. You probably tell people they need lossless FLAC files to truly understand your aesthetic.'
     },
     {
-      type: 'INFJ — The 2AM Ceiling Stare Specialist',
-      traits: ['Soulful', 'A24 aesthetic', 'Quiet intensity', 'Deep thinker'],
+      type: 'The Shoegaze Reverb Addict',
+      traits: ['Reverb dependent', 'Cannot hear lyrics', 'Vintage camera owner', 'Distant gaze'],
       percentages: [
-        { label: 'A24 Sadness Lifestyle', value: 50 },
-        { label: 'Late Night Overthinking', value: 30 },
-        { label: 'Secret Romantic', value: 20 }
+        { label: 'Guitar Pedal Distortion', value: 50 },
+        { label: 'Sensory Deprivation Need', value: 30 },
+        { label: 'Cloudy Day Energy', value: 20 }
       ],
-      summary: 'Oh, so sadness is a full-time aesthetic now? Your music selections are so atmospheric and moody that your houseplants are probably asking for therapy.'
+      summary: 'You treat the aux cord like a sensory deprivation tank where lyrics are entirely optional and emotional overwhelm is the primary aesthetic. Laying on the floor while guitar pedals swallow you whole is your default mode.'
     }
   ];
 
