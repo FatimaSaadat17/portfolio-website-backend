@@ -185,6 +185,124 @@ app.delete('/api/greetings/:id', async (req, res) => {
 });
 
 // ------------------------------------------------------------------
+// Music Taste Analyzer — AI backend route (Vercel serverless)
+// ------------------------------------------------------------------
+// This route calls the Hermes Agent Docker container's OpenAI-compatible
+// API server (http://localhost:8642/v1/chat/completions) with a curated
+// prompt that turns 5 songs into a personality type + traits + summary.
+//
+// Where does the request point? Injected from env at request time:
+//   MUSIC_ANALYZER_API_URL      OpenAI-compatible API server base (optional)
+//   MUSIC_ANALYZER_API_KEY      bearer key for that server (optional)
+// If unset locally, we default to the local Docker container
+// (http://localhost:8642) using the API_SERVER_KEY from the host .env
+// (visible to the local server, NOT to Vercel).
+//
+// On Vercel, the container does not run — set these two env vars in the
+// Vercel project to wherever your Hermes Docker container's API server is
+// reachable (e.g. a tunnel URL), or the route returns a clear offline
+// message. The frontend falls back gracefully either way.
+// ------------------------------------------------------------------
+async function callMusicAnalyzerApi({ songs, name }) {
+  const apiBase = (process.env.MUSIC_ANALYZER_API_URL || 'http://localhost:8642').replace(/\/+$/, '');
+  // Local: reuse API_SERVER_KEY from host .env / Vercel env
+  const apiKey = process.env.MUSIC_ANALYZER_API_KEY
+    || process.env.API_SERVER_KEY
+    || '';
+
+  const systemPrompt = `You are the Music Taste Analyzer, a fun, personality-insight engine for a portfolio website.
+The user submits 5 of their favorite songs. Analyze the musical fingerprint (genre, mood, energy, lyrics themes, era, artist style) and return:
+1. personalityType: a creative Myers-Briggs-inspired label, e.g. "ENFP — The Sonic Dreamer"
+2. traits: an array of exactly 4 short, punchy personality trait labels (e.g. "Curious", "Nostalgic")
+3. summary: 2-3 sentences describing what their taste says about them, warm and encouraging.
+Always respond with VALID JSON ONLY, no markdown fences, no commentary, in this exact shape:
+{"personalityType":"...","traits":["...","...","...","..."],"summary":"..."}`;
+
+  const userPrompt = name && name.trim()
+    ? `Name: ${name.trim()}\nFavorite songs:\n${songs.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
+    : `Favorite songs:\n${songs.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+
+  const res = await fetch(`${apiBase}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+    },
+    body: JSON.stringify({
+      model: 'hermes-agent',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      stream: false
+    })
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`AI backend responded ${res.status}: ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content || '';
+  if (!content) throw new Error('AI backend returned an empty response.');
+
+  // Parse the JSON the model returns (strip any accidental fences)
+  const cleaned = content.replace(/```json|```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('AI response was not valid JSON.');
+  return JSON.parse(cleaned.slice(start, end + 1));
+}
+
+app.post('/api/music-analyze', async (req, res) => {
+  const { songs, name } = req.body || {};
+
+  if (!Array.isArray(songs) || songs.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Please provide at least one song.'
+    });
+  }
+
+  const cleanedSongs = songs
+    .map(s => (typeof s === 'string' ? s.trim() : ''))
+    .filter(Boolean)
+    .slice(0, 5);
+
+  if (cleanedSongs.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Please enter at least one song title.'
+    });
+  }
+
+  try {
+    const analysis = await callMusicAnalyzerApi({
+      songs: cleanedSongs,
+      name: typeof name === 'string' ? name.slice(0, 60) : ''
+    });
+
+    res.json({
+      success: true,
+      data: {
+        songs: cleanedSongs,
+        personalityType: analysis.personalityType || 'The Unknown Groove',
+        traits: Array.isArray(analysis.traits) ? analysis.traits.slice(0, 4) : [],
+        summary: analysis.summary || 'Your music taste is uniquely yours — keep exploring!'
+      }
+    });
+  } catch (err) {
+    console.error('POST /api/music-analyze error:', err.message || err);
+    res.status(502).json({
+      success: false,
+      error: 'The music analysis engine is offline right now. Check back soon!',
+      detail: process.env.NODE_ENV === 'development' ? (err.message || String(err)) : undefined
+    });
+  }
+});
+
+// ------------------------------------------------------------------
 // Vercel serverless export (no app.listen — Vercel invokes the handler)
 // ------------------------------------------------------------------
 export default app;
